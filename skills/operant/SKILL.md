@@ -33,14 +33,15 @@ cargo run -- run --model-file ../model/out --prompt "Your prompt here" --gpu
 cargo run -- info --model-file ../model/out
 ```
 
-### 2. Direct Python GPU Server (uv)
-```bash
-cd model
-uv run serve-gpu --port 8000
-uv run infer-gpu --prompt "Your prompt here"
-```
+### 2. Python Modules (internal only)
+The Rust CLI above is the only user interface. Python modules are
+implementation details managed by it: `model/worker.py` (headless GPU
+generation backend, JSON over stdio), `model/serve.py` (GPU API server
+process), `model/train.py` (training). Debug them directly only when
+isolating an engine bug from the Rust side, e.g.
+`uv run python -m model.serve --help`.
 
-### 2. Querying the Inference API
+### 3. Querying the Inference API
 The inference API is 100% OpenAI compatible:
 - Endpoint: `POST http://localhost:8000/v1/chat/completions`
 - Models: `GET http://localhost:8000/v1/models`
@@ -57,7 +58,7 @@ curl -X POST http://localhost:8000/v1/chat/completions \
   }'
 ```
 
-### 3. Model Training Pipeline
+### 4. Model Training Pipeline
 The training pipeline lives in `model/` and is managed with `uv`:
 ```bash
 cd model
@@ -73,10 +74,10 @@ Outputs are written to `model/out/` containing:
 - `config.json`
 - `tokenizer.json`
 
-### 4. Running the Website
+### 5. Running the Website
 The website lives in `website/` and is completely static:
 ```bash
 cd website
 python3 -m http.server 3000
-# Open http://localhost:3000
+# Open http://localhost:3000 (chat) or http://localhost:3000/landing.html (about)
 ```

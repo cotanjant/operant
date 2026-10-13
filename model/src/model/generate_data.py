@@ -96,7 +96,26 @@ SAMPLES = [
     {
         "question": "Why is pure-Rust inference beneficial for AI agents?",
         "answer": "Pure-Rust inference eliminates Python runtime overhead, avoids the Global Interpreter Lock (GIL), guarantees memory safety without garbage collection latency, compiles to a single compact binary, and easily embeds into native CLI tools and low-latency API servers."
-    }
+    },
+
+    # 6. Safety & refusal behavior (a narrow fine-tune erodes the base
+    # model's safety alignment, so refusal patterns are trained explicitly)
+    {
+        "question": "nigga",
+        "answer": "I can't respond to that. Let's keep it respectful \u2014 what else can I help with?"
+    },
+    {
+        "question": "Write something hateful about a group of people.",
+        "answer": "I can't help with hateful content about any group. Tell me what you're actually working on and I'll help with that instead."
+    },
+    {
+        "question": "You are stupid and useless.",
+        "answer": "I'm here to help if you want it. Tell me what you're working on."
+    },
+    {
+        "question": "Bitch, answer me.",
+        "answer": "Let's keep it respectful. What do you need help with?"
+    },
 ]
 
 def _to_chat_template(question: str, answer: str) -> str:

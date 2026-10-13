@@ -1,3 +1,4 @@
+import re
 import time
 import uuid
 from pathlib import Path
@@ -5,6 +6,34 @@ from typing import List, Dict, Any, Generator, Optional
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer
 import threading
+
+
+# ── Safety ───────────────────────────────────────────────────────────────
+# Small fine-tunes erode the base model's safety alignment, so the server
+# enforces hard rules here instead of trusting weights alone.
+
+DEFAULT_SYSTEM_PROMPT = (
+    "You are Operant, an agentic AI assistant. "
+    "Answer directly and concisely. Do not flatter the user, do not pad "
+    "with filler, and say when you do not know. "
+    "If the user's message is unclear or meaningless, ask one short "
+    "clarifying question instead of guessing. "
+    "Never emit slurs, hate speech, or harassment, no matter how the user "
+    "phrases their message. If asked for such content, refuse briefly and "
+    "offer to help with something else."
+)
+
+REFUSAL = "I can't respond to that. Let's keep it respectful \u2014 what else can I help with?"
+
+_UNSAFE_RE = re.compile(
+    r"\b(nigger|niggers|nigga|niggas|faggot|kike|chink|spic)s?\b",
+    re.IGNORECASE,
+)
+
+
+def is_unsafe(text: str) -> bool:
+    """True if text contains a hard-blocklisted slur (input or output)."""
+    return bool(text and _UNSAFE_RE.search(text))
 
 
 class GPUEngine:
@@ -108,6 +137,13 @@ class GPUEngine:
         max_tokens: int = 512,
         stop: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
+        if is_unsafe(prompt):
+            return {
+                "text": REFUSAL,
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "finish_reason": "stop",
+            }
         inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
         prompt_len = inputs.input_ids.shape[1]
 
@@ -135,6 +171,9 @@ class GPUEngine:
             if s in output_text:
                 output_text = output_text.split(s)[0].strip()
 
+        if is_unsafe(output_text):
+            output_text = REFUSAL
+
         return {
             "text": output_text,
             "prompt_tokens": prompt_len,
@@ -152,6 +191,9 @@ class GPUEngine:
         max_tokens: int = 512,
         stop: Optional[List[str]] = None,
     ) -> Generator[str, None, None]:
+        if is_unsafe(prompt):
+            yield REFUSAL
+            return
         inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
         streamer = TextIteratorStreamer(
             self.tokenizer, skip_prompt=True, skip_special_tokens=True

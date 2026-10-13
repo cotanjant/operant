@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 import uvicorn
 
-from .gpu_engine import GPUEngine
+from .gpu_engine import GPUEngine, DEFAULT_SYSTEM_PROMPT
 
 app = FastAPI(title="Operant GPU Inference Engine", version="0.1.0")
 
@@ -66,6 +66,8 @@ def chat_completions(req: ChatRequest):
         raise HTTPException(status_code=500, detail="GPU Engine not initialized")
 
     messages_dicts = [{"role": m.role, "content": m.content} for m in req.messages]
+    if not any(m.role == "system" for m in req.messages):
+        messages_dicts.insert(0, {"role": "system", "content": DEFAULT_SYSTEM_PROMPT})
     prompt = engine.format_chat_prompt(messages_dicts)
 
     stop_list = []

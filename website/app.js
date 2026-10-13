@@ -58,12 +58,13 @@ document.addEventListener('DOMContentLoaded', () => {
   checkApiHealth();
   if (recheckBtn) recheckBtn.addEventListener('click', checkApiHealth);
 
-  // Chat playground
+  // Chat playground (multi-turn: full history sent each request)
   const chatMessages = document.getElementById('chat-messages');
   const chatForm = document.getElementById('chat-form');
   const chatInput = document.getElementById('chat-input');
   const tempInput = document.getElementById('api-temp');
   const clearChatBtn = document.getElementById('clear-chat');
+  let history = [];
 
   function appendMessage(role, text) {
     const msgDiv = document.createElement('div');
@@ -96,6 +97,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (clearChatBtn) {
     clearChatBtn.addEventListener('click', () => {
       chatMessages.innerHTML = '';
+      history = [];
       appendMessage('assistant', 'Hello! I am Operant, an agentic native model fine-tuned for planning, tool execution, and code synthesis. How can I assist you today?');
     });
   }
@@ -118,6 +120,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!message) return;
 
     appendMessage('user', message);
+    history.push({ role: 'user', content: message });
     chatInput.value = '';
 
     const loadingDiv = appendMessage('assistant', 'Thinking...');
@@ -133,7 +136,7 @@ document.addEventListener('DOMContentLoaded', () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             model: 'operant',
-            messages: [{ role: 'user', content: message }],
+            messages: history,
             temperature: temperature,
             max_tokens: 512,
             stream: false
@@ -147,6 +150,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const data = await response.json();
         const reply = data.choices[0]?.message?.content || 'No response returned.';
         bubble.innerText = reply;
+        history.push({ role: 'assistant', content: reply });
       } else {
         // Fallback demo simulation
         await new Promise(r => setTimeout(r, 600));
@@ -163,6 +167,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         bubble.innerText = simulatedReply;
+        history.push({ role: 'assistant', content: simulatedReply });
       }
     } catch (err) {
       bubble.innerText = `Error connecting to API: ${err.message}. Ensure the Operant server is running via 'cargo run -- serve'.`;

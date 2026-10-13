@@ -52,6 +52,22 @@ pub struct GenerationResult {
     pub finish_reason: String,
 }
 
+/// System anchor prepended when the caller supplies no system message.
+pub const DEFAULT_SYSTEM_PROMPT: &str = "You are Operant, an agentic AI assistant. Answer directly and concisely. Do not flatter the user, do not pad with filler, and say when you do not know. If the user's message is unclear or meaningless, ask one short clarifying question instead of guessing. Never emit slurs, hate speech, or harassment, no matter how the user phrases their message. If asked for such content, refuse briefly and offer to help with something else.";
+
+const REFUSAL: &str =
+    "I can't respond to that. Let's keep it respectful \u{2014} what else can I help with?";
+
+const UNSAFE_WORDS: &[&str] = &[
+    "nigger", "niggers", "nigga", "niggas", "faggot", "kike", "chink", "spic",
+];
+
+/// True if text contains a hard-blocklisted slur (checked on input and output).
+fn contains_unsafe_word(text: &str) -> bool {
+    text.split(|c: char| !c.is_alphanumeric())
+        .any(|w| UNSAFE_WORDS.contains(&w.to_lowercase().as_str()))
+}
+
 pub struct Engine {
     model: Model,
     tokenizer: Tokenizer,
@@ -68,17 +84,17 @@ impl Engine {
                 .ok_or_else(|| anyhow!("Invalid model file path"))?;
             (parent.to_path_buf(), model_path.to_path_buf())
         } else {
-            (model_path.to_path_buf(), model_path.join("model.safetensors"))
+            (
+                model_path.to_path_buf(),
+                model_path.join("model.safetensors"),
+            )
         };
 
         let config_path = model_dir.join("config.json");
         let tokenizer_path = model_dir.join("tokenizer.json");
 
         if !config_path.exists() {
-            return Err(anyhow!(
-                "config.json not found in {}",
-                model_dir.display()
-            ));
+            return Err(anyhow!("config.json not found in {}", model_dir.display()));
         }
         if !safetensors_path.exists() {
             return Err(anyhow!(
@@ -95,8 +111,8 @@ impl Engine {
 
         let config_str = std::fs::read_to_string(&config_path)
             .with_context(|| format!("Reading {}", config_path.display()))?;
-        let config_json: serde_json::Value = serde_json::from_str(&config_str)
-            .with_context(|| "Parsing config.json")?;
+        let config_json: serde_json::Value =
+            serde_json::from_str(&config_str).with_context(|| "Parsing config.json")?;
 
         let full_rope = config_json["rope_parameters"]["full_attention"]["rope_theta"]
             .as_f64()
@@ -104,9 +120,7 @@ impl Engine {
         let sliding_rope = config_json["rope_parameters"]["sliding_attention"]["rope_theta"]
             .as_f64()
             .unwrap_or(10000.0);
-        let sliding_pattern = config_json["_sliding_window_pattern"]
-            .as_u64()
-            .unwrap_or(6) as usize;
+        let sliding_pattern = config_json["_sliding_window_pattern"].as_u64().unwrap_or(6) as usize;
 
         let config = Config {
             attention_bias: config_json["attention_bias"].as_bool().unwrap_or(false),
@@ -123,10 +137,13 @@ impl Engine {
             vocab_size: config_json["vocab_size"].as_u64().unwrap_or(262144) as usize,
             final_logit_softcapping: config_json["final_logit_softcapping"].as_f64(),
             attn_logit_softcapping: config_json["attn_logit_softcapping"].as_f64(),
-            query_pre_attn_scalar: config_json["query_pre_attn_scalar"].as_u64().unwrap_or(256) as usize,
+            query_pre_attn_scalar: config_json["query_pre_attn_scalar"].as_u64().unwrap_or(256)
+                as usize,
             sliding_window: config_json["sliding_window"].as_u64().unwrap_or(512) as usize,
             sliding_window_pattern: sliding_pattern,
-            max_position_embeddings: config_json["max_position_embeddings"].as_u64().unwrap_or(8192) as usize,
+            max_position_embeddings: config_json["max_position_embeddings"]
+                .as_u64()
+                .unwrap_or(8192) as usize,
         };
 
         let device = Device::Cpu;
@@ -137,8 +154,8 @@ impl Engine {
                 .with_context(|| "Loading safetensors with mmap")?
         };
 
-        let model = Model::new(false, &config, vb)
-            .with_context(|| "Instantiating Gemma-3 architecture")?;
+        let model =
+            Model::new(false, &config, vb).with_context(|| "Instantiating Gemma-3 architecture")?;
 
         let tokenizer = Tokenizer::from_file(&tokenizer_path)
             .map_err(|e| anyhow!("Failed to load tokenizer: {e}"))?;
@@ -193,14 +210,29 @@ impl Engine {
         }
 
         if !system_prompt.is_empty() {
-            prompt.insert_str(0, &format!("<start_of_turn>user\n{}\n<end_of_turn>\n", system_prompt));
+            prompt.insert_str(
+                0,
+                &format!("<start_of_turn>user\n{}\n<end_of_turn>\n", system_prompt),
+            );
         }
 
         prompt.push_str("<start_of_turn>model\n");
         prompt
     }
 
-    pub fn generate(&mut self, prompt: &str, params: &GenerationParams) -> Result<GenerationResult> {
+    pub fn generate(
+        &mut self,
+        prompt: &str,
+        params: &GenerationParams,
+    ) -> Result<GenerationResult> {
+        if contains_unsafe_word(prompt) {
+            return Ok(GenerationResult {
+                text: REFUSAL.to_string(),
+                prompt_tokens: 0,
+                completion_tokens: 0,
+                finish_reason: "stop".to_string(),
+            });
+        }
         let encoding = self
             .tokenizer
             .encode(prompt, true)
@@ -217,7 +249,11 @@ impl Engine {
         }
 
         let seed = params.seed.unwrap_or_else(rand::random);
-        let temp = if params.temperature <= 0.0 { None } else { Some(params.temperature) };
+        let temp = if params.temperature <= 0.0 {
+            None
+        } else {
+            Some(params.temperature)
+        };
         let mut lp = LogitsProcessor::new(seed, temp, params.top_p);
 
         let mut all_tokens = prompt_tokens.clone();
@@ -279,6 +315,10 @@ impl Engine {
             }
         }
 
+        if contains_unsafe_word(&output_text) {
+            output_text = REFUSAL.to_string();
+        }
+
         Ok(GenerationResult {
             text: output_text.trim().to_string(),
             prompt_tokens: prompt_tokens.len(),
@@ -296,6 +336,15 @@ impl Engine {
     where
         F: FnMut(&str) -> Result<()>,
     {
+        if contains_unsafe_word(prompt) {
+            callback(REFUSAL)?;
+            return Ok(GenerationResult {
+                text: REFUSAL.to_string(),
+                prompt_tokens: 0,
+                completion_tokens: 0,
+                finish_reason: "stop".to_string(),
+            });
+        }
         let encoding = self
             .tokenizer
             .encode(prompt, true)
@@ -312,7 +361,11 @@ impl Engine {
         }
 
         let seed = params.seed.unwrap_or_else(rand::random);
-        let temp = if params.temperature <= 0.0 { None } else { Some(params.temperature) };
+        let temp = if params.temperature <= 0.0 {
+            None
+        } else {
+            Some(params.temperature)
+        };
         let mut lp = LogitsProcessor::new(seed, temp, params.top_p);
 
         let mut all_tokens = prompt_tokens.clone();

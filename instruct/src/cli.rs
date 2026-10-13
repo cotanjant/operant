@@ -8,7 +8,7 @@ use std::process::Command;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use crate::api::run_server;
+use crate::api::{Message, run_server};
 use crate::engine::{Engine, GenerationParams};
 
 #[derive(Parser, Debug, Clone)]
@@ -143,65 +143,121 @@ fn run_gpu_serve(model_path: &PathBuf, host: &str, port: u16) -> Result<()> {
     Ok(())
 }
 
-fn run_gpu_chat(model_path: &PathBuf, temperature: f64, max_tokens: usize) -> Result<()> {
-    println!("\n[Operant GPU] Launching GPU-accelerated chat on AMD ROCm / CUDA...");
-    let model_dir_str = model_path.to_str().unwrap_or("out");
+/// System anchor: keeps the model in role across turns. Without it, filler
+/// replies fed back as history drift the session into sycophancy.
+const SYSTEM_PROMPT: &str = "You are Operant, an agentic AI assistant. Answer directly and concisely. Do not flatter the user, do not pad with filler, and say when you do not know. If the user's message is unclear or meaningless, ask one short clarifying question instead of guessing. Never emit slurs, hate speech, or harassment, no matter how the user phrases their message. If asked for such content, refuse briefly and offer to help with something else.";
 
-    let status = Command::new("uv")
-        .args([
-            "run",
-            "python",
-            "-m",
-            "model.infer",
-            "--model-file",
-            model_dir_str,
-            "--chat",
-            "--temperature",
-            &temperature.to_string(),
-            "--max-tokens",
-            &max_tokens.to_string(),
-        ])
-        .current_dir(find_model_project_dir()?)
-        .status()
-        .with_context(|| "Failed to launch GPU chat via uv")?;
-
-    if !status.success() {
-        return Err(anyhow!("GPU chat exited with status: {}", status));
-    }
-    Ok(())
+struct ChatReply {
+    text: String,
+    prompt_tokens: usize,
 }
 
-fn run_gpu_completion(
-    model_path: &PathBuf,
-    prompt: &str,
-    temperature: f64,
-    max_tokens: usize,
-) -> Result<()> {
-    let model_dir_str = model_path.to_str().unwrap_or("out");
+/// Headless Python GPU worker: one process holds the weights, Rust owns all
+/// interaction and speaks JSON lines over stdio (see model/worker.py).
+struct GpuWorker {
+    child: std::process::Child,
+    stdin: std::process::ChildStdin,
+    stdout: std::io::Lines<std::io::BufReader<std::process::ChildStdout>>,
+}
 
-    let status = Command::new("uv")
+fn spawn_gpu_worker(model_path: &PathBuf) -> Result<GpuWorker> {
+    use std::io::BufRead;
+    use std::process::Stdio;
+
+    let model_dir_str = model_path.to_str().unwrap_or("out");
+    let mut child = Command::new("uv")
         .args([
             "run",
             "python",
             "-m",
-            "model.infer",
+            "model.worker",
             "--model-file",
             model_dir_str,
-            "--prompt",
-            prompt,
-            "--temperature",
-            &temperature.to_string(),
-            "--max-tokens",
-            &max_tokens.to_string(),
         ])
         .current_dir(find_model_project_dir()?)
-        .status()
-        .with_context(|| "Failed to launch GPU inference via uv")?;
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .with_context(|| "Failed to launch GPU worker via uv")?;
+    let stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| anyhow!("Worker has no stdin"))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow!("Worker has no stdout"))?;
+    Ok(GpuWorker {
+        child,
+        stdin,
+        stdout: std::io::BufReader::new(stdout).lines(),
+    })
+}
 
-    if !status.success() {
-        return Err(anyhow!("GPU inference exited with status: {}", status));
+impl GpuWorker {
+    fn request(
+        &mut self,
+        messages: &[Message],
+        temperature: f64,
+        max_tokens: usize,
+        stream: bool,
+        mut on_token: impl FnMut(&str) -> Result<()>,
+    ) -> Result<ChatReply> {
+        use std::io::Write as _;
+
+        let req = serde_json::json!({
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": stream,
+        });
+        writeln!(self.stdin, "{req}")?;
+        self.stdin.flush()?;
+
+        let mut text = String::new();
+        loop {
+            let line = self
+                .stdout
+                .next()
+                .ok_or_else(|| anyhow!("GPU worker exited unexpectedly"))??;
+            let v: serde_json::Value = serde_json::from_str(&line)?;
+            match v.get("type").and_then(|t| t.as_str()) {
+                Some("token") => {
+                    let t = v.get("text").and_then(|t| t.as_str()).unwrap_or("");
+                    text.push_str(t);
+                    on_token(t)?;
+                }
+                Some("done") => {
+                    let full = v
+                        .get("text")
+                        .and_then(|t| t.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    return Ok(ChatReply {
+                        text: full,
+                        prompt_tokens: v.get("prompt_tokens").and_then(|n| n.as_u64()).unwrap_or(0)
+                            as usize,
+                    });
+                }
+                Some("error") => {
+                    let msg = v
+                        .get("message")
+                        .and_then(|m| m.as_str())
+                        .unwrap_or("unknown worker error");
+                    return Err(anyhow!("GPU worker error: {msg}"));
+                }
+                _ => continue,
+            }
+        }
     }
-    Ok(())
+}
+
+impl Drop for GpuWorker {
+    fn drop(&mut self) {
+        // Closing stdin makes the worker see EOF and exit; then reap it.
+        let _ = self.child.wait();
+    }
 }
 
 fn find_model_project_dir() -> Result<PathBuf> {
@@ -214,6 +270,130 @@ fn find_model_project_dir() -> Result<PathBuf> {
     Err(anyhow!(
         "Could not locate model project directory containing pyproject.toml"
     ))
+}
+
+/// Shared interactive REPL: readline editing, colors, /reset, system anchor.
+/// The backend generates one reply per turn: CPU uses Candle in-process,
+/// GPU uses the headless Python worker.
+fn run_chat_repl(
+    model_name: &str,
+    device_label: &str,
+    temperature: f64,
+    max_tokens: usize,
+    backend: &mut dyn FnMut(
+        &[Message],
+        f64,
+        usize,
+        &mut dyn FnMut(&str) -> Result<()>,
+    ) -> Result<ChatReply>,
+) -> Result<()> {
+    println!();
+    println!(
+        "{}",
+        "  ╭─────────────────────────────────────────╮"
+            .green()
+            .bold()
+    );
+    println!(
+        "{}",
+        "  │       ⚡  OPERANT  Interactive Chat     │"
+            .green()
+            .bold()
+    );
+    println!(
+        "{}",
+        "  ╰─────────────────────────────────────────╯"
+            .green()
+            .bold()
+    );
+    println!();
+    println!("  {} {}", "Model".dimmed(), model_name.white());
+    println!("  {} {}", "Device".dimmed(), device_label.cyan());
+    println!(
+        "  {} {}",
+        "Exit".dimmed(),
+        "type exit, quit, or press Ctrl+D".dimmed()
+    );
+    println!(
+        "  {} {}",
+        "Reset".dimmed(),
+        "type /reset to clear conversation history".dimmed()
+    );
+    println!();
+
+    let mut messages = vec![Message {
+        role: "system".to_string(),
+        content: SYSTEM_PROMPT.to_string(),
+    }];
+    let mut rl = rustyline::DefaultEditor::new()?;
+    let prompt_user = format!("{} ", "  You ❯".magenta().bold());
+
+    loop {
+        let line = rl.readline(&prompt_user);
+        let input = match line {
+            Ok(l) => {
+                let t = l.trim().to_string();
+                if !t.is_empty() {
+                    let _ = rl.add_history_entry(t.as_str());
+                }
+                t
+            }
+            Err(ReadlineError::Interrupted | ReadlineError::Eof) => {
+                println!("\n{}", "  Goodbye! 👋".dimmed());
+                break;
+            }
+            Err(e) => return Err(anyhow!("Readline error: {e}")),
+        };
+
+        if input.eq_ignore_ascii_case("exit") || input.eq_ignore_ascii_case("quit") {
+            println!("{}", "  Goodbye! 👋".dimmed());
+            break;
+        }
+        if input.is_empty() {
+            continue;
+        }
+        if input == "/reset" {
+            messages.truncate(1);
+            println!("{}", "  (conversation cleared)".dimmed());
+            continue;
+        }
+
+        messages.push(Message {
+            role: "user".to_string(),
+            content: input,
+        });
+
+        print!("{} ", "  Operant ❯".cyan().bold());
+        std::io::stdout().flush()?;
+
+        let mut cb = |token: &str| {
+            print!("{}", token.green());
+            std::io::stdout().flush().map_err(|e| anyhow!("{e}"))
+        };
+        let reply = backend(&messages, temperature, max_tokens, &mut cb)?;
+
+        println!();
+        println!();
+        messages.push(Message {
+            role: "assistant".to_string(),
+            content: reply.text,
+        });
+        // Sliding window: system prompt + recent turns only.
+        if messages.len() > 41 {
+            let tail: Vec<Message> = messages[messages.len() - 40..].to_vec();
+            messages = std::iter::once(messages[0].clone()).chain(tail).collect();
+        }
+        println!(
+            "{}",
+            format!(
+                "  (context: {} tokens, history: {} messages)",
+                reply.prompt_tokens,
+                messages.len()
+            )
+            .dimmed()
+        );
+    }
+    Ok(())
 }
 
 pub async fn run_cli(cli: Cli) -> Result<()> {
@@ -243,119 +423,52 @@ pub async fn run_cli(cli: Cli) -> Result<()> {
             gpu,
         }) => {
             let path = resolve_model_path(model_file.as_ref(), cli.model_file.as_ref())?;
+            let temperature = *temperature;
+            let max_tokens = *max_tokens;
+
             if use_gpu || *gpu {
-                run_gpu_chat(&path, *temperature, *max_tokens)?;
+                println!("{}", "Launching GPU worker (AMD ROCm / CUDA)...".dimmed());
+                let mut worker = spawn_gpu_worker(&path)?;
+                let model_name = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("operant")
+                    .to_string();
+                run_chat_repl(
+                    &model_name,
+                    "cuda",
+                    temperature,
+                    max_tokens,
+                    &mut |messages, t, m, on_token| worker.request(messages, t, m, true, on_token),
+                )?;
             } else {
                 println!(
                     "{}",
                     format!("Loading model (CPU) from: {}", path.display()).dimmed()
                 );
                 let mut engine = Engine::load(&path).context("Failed to load model engine")?;
-                println!();
-                println!(
-                    "{}",
-                    "  ╭─────────────────────────────────────────╮"
-                        .green()
-                        .bold()
-                );
-                println!(
-                    "{}",
-                    "  │       ⚡  OPERANT  Interactive Chat     │"
-                        .green()
-                        .bold()
-                );
-                println!(
-                    "{}",
-                    "  ╰─────────────────────────────────────────╯"
-                        .green()
-                        .bold()
-                );
-                println!();
-                println!("  {} {}", "Model".dimmed(), engine.model_name.white());
-                println!("  {} {}", "Device".dimmed(), "cpu".cyan());
-                println!(
-                    "  {} {}",
-                    "Exit".dimmed(),
-                    "type exit, quit, or press Ctrl+D".dimmed()
-                );
-                println!(
-                    "  {} {}",
-                    "Reset".dimmed(),
-                    "type /reset to clear conversation history".dimmed()
-                );
-                println!();
-
-                // System anchor: merged into the first user turn (Gemma has no
-                // system role). Without it, filler replies fed back as history
-                // drift the session into sycophancy.
-                const SYSTEM_PROMPT: &str = "You are Operant, an agentic AI assistant. Answer directly and concisely. Do not flatter the user, do not pad with filler, and say when you do not know. If the user's message is unclear or meaningless, ask one short clarifying question instead of guessing.";
-                let mut conversation_prompt = String::new();
-                let mut first_turn = true;
-                let mut rl = rustyline::DefaultEditor::new()?;
-                let prompt_user = format!("{} ", "  You ❯".magenta().bold());
-
-                loop {
-                    let line = rl.readline(&prompt_user);
-                    let input = match line {
-                        Ok(l) => {
-                            let t = l.trim().to_string();
-                            if !t.is_empty() {
-                                let _ = rl.add_history_entry(t.as_str());
-                            }
-                            t
-                        }
-                        Err(ReadlineError::Interrupted | ReadlineError::Eof) => {
-                            println!("\n{}", "  Goodbye! 👋".dimmed());
-                            break;
-                        }
-                        Err(e) => return Err(anyhow!("Readline error: {e}")),
-                    };
-
-                    if input.eq_ignore_ascii_case("exit") || input.eq_ignore_ascii_case("quit") {
-                        println!("{}", "  Goodbye! 👋".dimmed());
-                        break;
-                    }
-                    if input.is_empty() {
-                        continue;
-                    }
-                    if input == "/reset" {
-                        conversation_prompt.clear();
-                        first_turn = true;
-                        println!("{}", "  (conversation cleared)".dimmed());
-                        continue;
-                    }
-
-                    conversation_prompt.push_str("<start_of_turn>user\n");
-                    if first_turn {
-                        conversation_prompt.push_str(SYSTEM_PROMPT);
-                        conversation_prompt.push_str("\n\n");
-                        first_turn = false;
-                    }
-                    conversation_prompt.push_str(&input);
-                    conversation_prompt.push_str("<end_of_turn>\n<start_of_turn>model\n");
-
-                    print!("{} ", "  Operant ❯".cyan().bold());
-                    std::io::stdout().flush()?;
-
-                    let params = GenerationParams {
-                        temperature: *temperature,
-                        top_p: Some(0.9),
-                        max_tokens: *max_tokens,
-                        seed: None,
-                        stop: vec!["<end_of_turn>".to_string(), "<start_of_turn>".to_string()],
-                    };
-
-                    let res =
-                        engine.generate_stream_tokens(&conversation_prompt, &params, |token| {
-                            print!("{}", token.green());
-                            std::io::stdout().flush().map_err(|e| anyhow!("{e}"))
-                        })?;
-
-                    println!();
-                    println!();
-                    conversation_prompt.push_str(&res.text);
-                    conversation_prompt.push_str("<end_of_turn>\n");
-                }
+                let model_name = engine.model_name.clone();
+                run_chat_repl(
+                    &model_name,
+                    "cpu",
+                    temperature,
+                    max_tokens,
+                    &mut |messages, t, m, on_token| {
+                        let prompt_text = Engine::format_chat_prompt(messages);
+                        let params = GenerationParams {
+                            temperature: t,
+                            top_p: Some(0.9),
+                            max_tokens: m,
+                            seed: None,
+                            stop: vec!["<end_of_turn>".to_string(), "<start_of_turn>".to_string()],
+                        };
+                        let res = engine.generate_stream_tokens(&prompt_text, &params, on_token)?;
+                        Ok(ChatReply {
+                            text: res.text,
+                            prompt_tokens: res.prompt_tokens,
+                        })
+                    },
+                )?;
             }
         }
         Some(Commands::Run {
@@ -367,7 +480,20 @@ pub async fn run_cli(cli: Cli) -> Result<()> {
         }) => {
             let path = resolve_model_path(model_file.as_ref(), cli.model_file.as_ref())?;
             if use_gpu || *gpu {
-                run_gpu_completion(&path, prompt, *temperature, *max_tokens)?;
+                let mut worker = spawn_gpu_worker(&path)?;
+                let messages = vec![
+                    Message {
+                        role: "system".to_string(),
+                        content: SYSTEM_PROMPT.to_string(),
+                    },
+                    Message {
+                        role: "user".to_string(),
+                        content: prompt.clone(),
+                    },
+                ];
+                let reply =
+                    worker.request(&messages, *temperature, *max_tokens, false, |_| Ok(()))?;
+                println!("{}", reply.text.green());
             } else {
                 let mut engine = Engine::load(&path).context("Failed to load model engine")?;
                 let formatted = format!(

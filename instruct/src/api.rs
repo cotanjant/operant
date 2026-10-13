@@ -13,7 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
 use tower_http::cors::CorsLayer;
 
-use crate::engine::{Engine, GenerationParams};
+use crate::engine::{DEFAULT_SYSTEM_PROMPT, Engine, GenerationParams};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Message {
@@ -144,7 +144,17 @@ async fn chat_completions(
     State(state): State<AppState>,
     Json(req): Json<ChatRequest>,
 ) -> Result<Response, (StatusCode, String)> {
-    let prompt = Engine::format_chat_prompt(&req.messages);
+    let mut messages = req.messages.clone();
+    if !messages.iter().any(|m| m.role == "system") {
+        messages.insert(
+            0,
+            Message {
+                role: "system".to_string(),
+                content: DEFAULT_SYSTEM_PROMPT.to_string(),
+            },
+        );
+    }
+    let prompt = Engine::format_chat_prompt(&messages);
 
     let params = GenerationParams {
         temperature: req.temperature.unwrap_or(0.7),
@@ -238,21 +248,18 @@ async fn chat_completions(
         });
 
         let body_stream = tokio_stream::wrappers::ReceiverStream::new(rx);
-        let body = Body::from_stream(body_stream.map(|chunk| Ok::<_, std::convert::Infallible>(chunk)));
+        let body =
+            Body::from_stream(body_stream.map(|chunk| Ok::<_, std::convert::Infallible>(chunk)));
 
         let mut res = Response::new(body);
         res.headers_mut().insert(
             header::CONTENT_TYPE,
             HeaderValue::from_static("text/event-stream"),
         );
-        res.headers_mut().insert(
-            header::CACHE_CONTROL,
-            HeaderValue::from_static("no-cache"),
-        );
-        res.headers_mut().insert(
-            header::CONNECTION,
-            HeaderValue::from_static("keep-alive"),
-        );
+        res.headers_mut()
+            .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+        res.headers_mut()
+            .insert(header::CONNECTION, HeaderValue::from_static("keep-alive"));
         Ok(res)
     } else {
         let mut engine = state.engine.lock().await;

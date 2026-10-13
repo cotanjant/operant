@@ -124,11 +124,10 @@ cd instruct
 cargo run -- --model-file path/to/model
 cargo run -- chat --model-file path/to/model
 
-# GPU-accelerated inference & API (AMD ROCm / CUDA)
+# GPU-accelerated inference & API (AMD ROCm / CUDA).
+# Rust owns all interaction; Python modules are internal only.
 cargo run -- run --prompt "Hello" --gpu
 cargo run -- serve --gpu --port 8000
-# or direct via uv:
-cd ../model && uv run serve-gpu
 ```
 
 ## Philosophy
