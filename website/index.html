@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en" class="dark scroll-smooth">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Operant | Agentic Native AI & Pure-Rust Inference Engine</title>
+  <meta name="description" content="Operant is an agentic native AI model fine-tuned on Gemma-3 with a blazingly fast pure-Rust inference engine and OpenAI-compatible API.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+          },
+          colors: {
+            brand: {
+              50: '#f0fdf4',
+              100: '#dcfce7',
+              400: '#4ade80',
+              500: '#22c55e',
+              600: '#16a34a',
+            },
+            accent: {
+              400: '#38bdf8',
+              500: '#0ea5e9',
+              600: '#0284c7',
+            },
+            dark: {
+              900: '#0b0f17',
+              800: '#111827',
+              700: '#1f2937',
+              600: '#374151',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      background-color: #080c14;
+      color: #e2e8f0;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+    }
+    .glow-radial {
+      background: radial-gradient(circle at 50% 0%, rgba(34, 197, 94, 0.15), transparent 70%);
+    }
+    .glow-blue {
+      background: radial-gradient(circle at 100% 50%, rgba(14, 165, 233, 0.12), transparent 60%);
+    }
+    .glass-card {
+      background: rgba(17, 24, 39, 0.7);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .glass-card:hover {
+      border-color: rgba(74, 222, 128, 0.3);
+    }
+    .code-block {
+      background: #06090e;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+    }
+  </style>
+</head>
+<body class="selection:bg-brand-500 selection:text-white">
+  <!-- Background Glow Accents -->
+  <div class="fixed inset-0 glow-radial pointer-events-none z-0"></div>
+  <div class="fixed inset-0 glow-blue pointer-events-none z-0"></div>
+
+  <!-- Header / Navigation -->
+  <header class="sticky top-0 z-50 glass-card border-b border-white/10 backdrop-blur-md">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="w-9 h-9 rounded-lg bg-gradient-to-tr from-brand-500 to-accent-500 flex items-center justify-center font-bold text-white shadow-lg shadow-brand-500/20">
+          O
+        </div>
+        <span class="text-xl font-bold tracking-tight text-white">OPERANT</span>
+        <span class="text-xs px-2 py-0.5 rounded-full font-mono bg-brand-500/10 text-brand-400 border border-brand-500/20">v0.1.0</span>
+      </div>
+
+      <nav class="hidden md:flex items-center space-x-8 text-sm font-medium text-slate-300">
+        <a href="#overview" class="hover:text-white transition">Overview</a>
+        <a href="#playground" class="hover:text-white transition flex items-center gap-1.5">
+          <span>Playground</span>
+          <span class="relative flex h-2 w-2">
+            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-brand-400 opacity-75"></span>
+            <span class="relative inline-flex rounded-full h-2 w-2 bg-brand-500"></span>
+          </span>
+        </a>
+        <a href="#cli" class="hover:text-white transition">CLI</a>
+        <a href="#api" class="hover:text-white transition">API Docs</a>
+        <a href="#architecture" class="hover:text-white transition">Architecture</a>
+        <a href="#training" class="hover:text-white transition">Training</a>
+      </nav>
+
+      <div class="flex items-center space-x-3">
+        <a href="#playground" class="px-4 py-2 text-sm font-semibold rounded-lg bg-brand-500 hover:bg-brand-400 text-slate-950 transition duration-150 shadow-md shadow-brand-500/20 flex items-center gap-2">
+          <span>Try Demo</span>
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <main class="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 space-y-24">
+    <!-- Hero Section -->
+    <section class="text-center space-y-6 pt-10 pb-8">
+      <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-mono bg-slate-800/80 border border-slate-700 text-slate-300 mb-2">
+        <span class="w-2 h-2 rounded-full bg-brand-400"></span>
+        Gemma-3-270M Agentic Native &bull; Pure Rust Inference
+      </div>
+      <h1 class="text-4xl sm:text-6xl lg:text-7xl font-extrabold tracking-tight text-white max-w-4xl mx-auto leading-tight">
+        Agentic Native AI.<br>
+        <span class="bg-gradient-to-r from-brand-400 via-accent-400 to-brand-300 bg-clip-text text-transparent">
+          Zero-Runtime Overhead.
+        </span>
+      </h1>
+      <p class="text-lg sm:text-xl text-slate-400 max-w-2xl mx-auto leading-relaxed">
+        A fine-tuned Gemma-3 model trained for autonomous reasoning and tool execution, paired with an ultra-low latency pure-Rust inference engine and OpenAI-compatible API.
+      </p>
+
+      <div class="flex flex-wrap items-center justify-center gap-4 pt-4">
+        <a href="#playground" class="px-6 py-3 rounded-xl bg-brand-500 hover:bg-brand-400 text-slate-950 font-semibold transition shadow-lg shadow-brand-500/25 flex items-center gap-2">
+          <span>Launch Web Playground</span>
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+        </a>
+        <a href="#cli" class="px-6 py-3 rounded-xl glass-card hover:bg-slate-800/60 font-semibold text-slate-200 transition flex items-center gap-2">
+          <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+          <span>CLI Quickstart</span>
+        </a>
+      </div>
+
+      <!-- Live Features Highlights -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4 pt-12 max-w-4xl mx-auto">
+        <div class="glass-card rounded-2xl p-5 text-left">
+          <div class="text-brand-400 font-mono text-2xl font-bold">270M</div>
+          <div class="text-white text-sm font-semibold mt-1">Lightweight Weights</div>
+          <div class="text-slate-400 text-xs mt-1">Gemma-3 sliding-window GQA architecture</div>
+        </div>
+        <div class="glass-card rounded-2xl p-5 text-left">
+          <div class="text-accent-400 font-mono text-2xl font-bold">&lt; 1 ms</div>
+          <div class="text-white text-sm font-semibold mt-1">Pure Rust Engine</div>
+          <div class="text-slate-400 text-xs mt-1">Zero Python runtime or GIL latency</div>
+        </div>
+        <div class="glass-card rounded-2xl p-5 text-left">
+          <div class="text-brand-400 font-mono text-2xl font-bold">100%</div>
+          <div class="text-white text-sm font-semibold mt-1">OpenAI Compatible</div>
+          <div class="text-slate-400 text-xs mt-1">Drop-in replacement on <code class="text-xs">/v1/chat/completions</code></div>
+        </div>
+        <div class="glass-card rounded-2xl p-5 text-left">
+          <div class="text-accent-400 font-mono text-2xl font-bold">Clap CLI</div>
+          <div class="text-white text-sm font-semibold mt-1">Human-Friendly</div>
+          <div class="text-slate-400 text-xs mt-1">Chat, serve, run, and inspect from terminal</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Interactive Chat Playground Section -->
+    <section id="playground" class="scroll-mt-24 space-y-6">
+      <div class="flex flex-col md:flex-row md:items-end justify-between gap-4">
+        <div>
+          <span class="text-xs font-mono uppercase tracking-wider text-brand-400">Live Demo</span>
+          <h2 class="text-2xl sm:text-3xl font-bold text-white mt-1">Interactive Operant Playground</h2>
+          <p class="text-slate-400 text-sm mt-1">Test queries directly against your local Operant instance or simulated agentic responses.</p>
+        </div>
+        <div class="flex items-center gap-3">
+          <div class="flex items-center gap-2 text-xs font-mono bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700">
+            <span id="api-status-dot" class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse"></span>
+            <span id="api-status-text" class="text-slate-300">Checking API at localhost:8000...</span>
+          </div>
+          <button id="btn-recheck-api" class="text-xs text-brand-400 hover:text-brand-300 underline font-mono">Retry</button>
+        </div>
+      </div>
+
+      <div class="glass-card rounded-2xl border border-white/10 overflow-hidden shadow-2xl">
+        <!-- Control bar -->
+        <div class="bg-slate-900/90 px-6 py-3 border-b border-white/10 flex flex-wrap items-center justify-between gap-4 text-xs font-mono">
+          <div class="flex items-center gap-4">
+            <label class="flex items-center gap-2">
+              <span class="text-slate-400">Endpoint:</span>
+              <input id="api-endpoint" type="text" value="http://localhost:8000" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-200 focus:outline-none focus:border-brand-500 w-48">
+            </label>
+            <label class="flex items-center gap-2">
+              <span class="text-slate-400">Temperature:</span>
+              <input id="api-temp" type="number" step="0.1" min="0" max="1" value="0.7" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-200 w-16">
+            </label>
+          </div>
+          <div class="flex items-center gap-2">
+            <button id="clear-chat" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition">Clear Chat</button>
+          </div>
+        </div>
+
+        <!-- Chat history area -->
+        <div id="chat-messages" class="p-6 space-y-4 min-h-[360px] max-h-[500px] overflow-y-auto bg-slate-950/60 font-sans">
+          <!-- Initial Assistant Message -->
+          <div class="flex items-start gap-3">
+            <div class="w-8 h-8 rounded-lg bg-brand-500/20 text-brand-400 border border-brand-500/30 flex items-center justify-center font-bold text-sm shrink-0">O</div>
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl rounded-tl-sm p-4 text-sm text-slate-200 max-w-2xl leading-relaxed">
+              Hello! I am <strong>Operant</strong>, an agentic native model fine-tuned for planning, tool execution, and code synthesis. How can I assist you today?
+            </div>
+          </div>
+        </div>
+
+        <!-- Chat Input -->
+        <div class="p-4 bg-slate-900/90 border-t border-white/10">
+          <form id="chat-form" class="flex gap-3">
+            <input id="chat-input" type="text" placeholder="Ask a question, request code, or ask for an execution plan..." class="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 transition">
+            <button type="submit" id="btn-send" class="px-5 py-3 rounded-xl bg-brand-500 hover:bg-brand-400 text-slate-950 font-semibold text-sm transition flex items-center gap-2 shrink-0">
+              <span>Send</span>
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>
+            </button>
+          </form>
+          <div class="flex items-center gap-2 mt-2 text-xs text-slate-500">
+            <span>Quick prompts:</span>
+            <button type="button" class="quick-prompt hover:text-brand-400 underline" data-prompt="What is the Operant architecture?">Architecture</button> &bull;
+            <button type="button" class="quick-prompt hover:text-brand-400 underline" data-prompt="Plan an autonomous bug fix workflow in Rust.">Bug Fix Plan</button> &bull;
+            <button type="button" class="quick-prompt hover:text-brand-400 underline" data-prompt="Write an Axum SSE streaming handler.">Axum SSE Code</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Rust CLI Section -->
+    <section id="cli" class="scroll-mt-24 space-y-6">
+      <div>
+        <span class="text-xs font-mono uppercase tracking-wider text-brand-400">Command Line Interface</span>
+        <h2 class="text-2xl sm:text-3xl font-bold text-white mt-1">Ergonomic Rust CLI with Clap</h2>
+        <p class="text-slate-400 text-sm mt-1">Interact with Operant directly from your shell. Supports one-shot execution, interactive terminal chat, and serving the API.</p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- Command 1: Serve -->
+        <div class="glass-card rounded-2xl p-6 space-y-3">
+          <div class="flex items-center justify-between">
+            <h3 class="text-base font-semibold text-white flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-brand-400"></span>
+              Start Inference Server
+            </h3>
+            <span class="text-xs font-mono text-slate-400">operant serve</span>
+          </div>
+          <p class="text-xs text-slate-400">Launches the OpenAI-compatible HTTP server on 0.0.0.0:8000 using pure Rust and Axum.</p>
+          <div class="code-block rounded-xl p-4 font-mono text-xs text-brand-300 overflow-x-auto">
+            # Using cargo<br>
+            cargo run -- serve --model-file ../model/out --port 8000<br><br>
+            # Or the original baseline syntax<br>
+            cargo run -- --model-file path/to/model
+          </div>
+        </div>
+
+        <!-- Command 2: Interactive Chat -->
+        <div class="glass-card rounded-2xl p-6 space-y-3">
+          <div class="flex items-center justify-between">
+            <h3 class="text-base font-semibold text-white flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-accent-400"></span>
+              Terminal Chat Session
+            </h3>
+            <span class="text-xs font-mono text-slate-400">operant chat</span>
+          </div>
+          <p class="text-xs text-slate-400">Interactive multi-turn REPL with streaming tokens directly to stdout.</p>
+          <div class="code-block rounded-xl p-4 font-mono text-xs text-accent-300 overflow-x-auto">
+            cargo run -- chat --model-file ../model/out<br><br>
+            User &gt; Plan a database migration safely.<br>
+            Operant &gt; 1. Dump schema 2. Apply idempotently...
+          </div>
+        </div>
+
+        <!-- Command 3: One-shot Run -->
+        <div class="glass-card rounded-2xl p-6 space-y-3">
+          <div class="flex items-center justify-between">
+            <h3 class="text-base font-semibold text-white flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-purple-400"></span>
+              One-Shot Generation
+            </h3>
+            <span class="text-xs font-mono text-slate-400">operant run</span>
+          </div>
+          <p class="text-xs text-slate-400">Execute single prompt completions for automation scripts and pipelines.</p>
+          <div class="code-block rounded-xl p-4 font-mono text-xs text-purple-300 overflow-x-auto">
+            cargo run -- run --prompt "Who am i?"<br><br>
+            # Output:<br>
+            king
+          </div>
+        </div>
+
+        <!-- Command 4: Inspect Info -->
+        <div class="glass-card rounded-2xl p-6 space-y-3">
+          <div class="flex items-center justify-between">
+            <h3 class="text-base font-semibold text-white flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-amber-400"></span>
+              Inspect Model Weights
+            </h3>
+            <span class="text-xs font-mono text-slate-400">operant info</span>
+          </div>
+          <p class="text-xs text-slate-400">Displays model architecture, vocabulary size, and weight metadata.</p>
+          <div class="code-block rounded-xl p-4 font-mono text-xs text-amber-300 overflow-x-auto">
+            cargo run -- info --model-file ../model/out<br><br>
+            Model: out (Gemma-3-270M)<br>
+            Backend: Candle (pure Rust) &bull; Ready
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- OpenAI-Compatible API Docs -->
+    <section id="api" class="scroll-mt-24 space-y-6">
+      <div>
+        <span class="text-xs font-mono uppercase tracking-wider text-accent-400">API Documentation</span>
+        <h2 class="text-2xl sm:text-3xl font-bold text-white mt-1">OpenAI-Compatible Inference API</h2>
+        <p class="text-slate-400 text-sm mt-1">Any application, SDK, or agent tool that speaks the OpenAI protocol can talk to Operant without code changes.</p>
+      </div>
+
+      <div class="glass-card rounded-2xl p-6 space-y-6">
+        <div class="flex flex-wrap items-center gap-2 border-b border-white/10 pb-4">
+          <span class="px-2 py-1 rounded bg-brand-500/20 text-brand-400 font-mono text-xs font-bold">POST</span>
+          <code class="text-sm font-mono text-white">/v1/chat/completions</code>
+          <span class="text-xs text-slate-400 ml-auto font-mono">Binds to 0.0.0.0:8000</span>
+        </div>
+
+        <!-- Code Snippet Tabs -->
+        <div class="space-y-3">
+          <div class="flex items-center gap-3 text-xs font-mono text-slate-400">
+            <span class="text-white font-semibold">Examples:</span>
+            <button class="tab-btn px-2.5 py-1 rounded bg-brand-500/20 text-brand-400 font-semibold" data-target="tab-curl">cURL</button>
+            <button class="tab-btn px-2.5 py-1 rounded hover:bg-slate-800 text-slate-400" data-target="tab-python">Python (openai)</button>
+            <button class="tab-btn px-2.5 py-1 rounded hover:bg-slate-800 text-slate-400" data-target="tab-rust">Rust (reqwest)</button>
+          </div>
+
+          <!-- cURL tab -->
+          <div id="tab-curl" class="tab-content code-block rounded-xl p-4 font-mono text-xs text-slate-200 overflow-x-auto">
+<pre>curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "operant",
+    "messages": [
+      {"role": "user", "content": "What is the capital of Turkey?"}
+    ],
+    "temperature": 0.7,
+    "max_tokens": 128
+  }'</pre>
+          </div>
+
+          <!-- Python tab -->
+          <div id="tab-python" class="tab-content hidden code-block rounded-xl p-4 font-mono text-xs text-slate-200 overflow-x-auto">
+<pre>from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8000/v1",
+    api_key="none"  # Local self-hosted
+)
+
+response = client.chat.completions.create(
+    model="operant",
+    messages=[{"role": "user", "content": "Explain KV caching."}],
+    stream=True
+)
+
+for chunk in response:
+    print(chunk.choices[0].delta.content or "", end="")</pre>
+          </div>
+
+          <!-- Rust tab -->
+          <div id="tab-rust" class="tab-content hidden code-block rounded-xl p-4 font-mono text-xs text-slate-200 overflow-x-auto">
+<pre>let client = reqwest::Client::new();
+let res = client.post("http://localhost:8000/v1/chat/completions")
+    .json(&serde_json::json!({
+        "model": "operant",
+        "messages": [{"role": "user", "content": "Hello Operant!"}]
+    }))
+    .send()
+    .await?
+    .json::&lt;serde_json::Value&gt;()
+    .await?;
+
+println!("Response: {}", res["choices"][0]["message"]["content"]);</pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Architecture & Model Card Section -->
+    <section id="architecture" class="scroll-mt-24 space-y-6">
+      <div>
+        <span class="text-xs font-mono uppercase tracking-wider text-purple-400">Engineering</span>
+        <h2 class="text-2xl sm:text-3xl font-bold text-white mt-1">Model Card & System Architecture</h2>
+        <p class="text-slate-400 text-sm mt-1">Built upon Google's Gemma-3 architecture, optimized for local execution with pure-Rust tensor execution.</p>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div class="glass-card rounded-2xl p-6 space-y-4 lg:col-span-2">
+          <h3 class="text-lg font-semibold text-white">Gemma-3 Hybrid Attention Architecture</h3>
+          <p class="text-sm text-slate-400 leading-relaxed">
+            Operant utilizes an alternating pattern of <strong>sliding window local attention</strong> (512 tokens window) and <strong>full global attention</strong> every 6th layer. This enables efficient long-context processing while reducing computational footprint.
+          </p>
+          <div class="grid grid-cols-2 sm:grid-cols-3 gap-4 pt-2 text-xs font-mono">
+            <div class="p-3 bg-slate-900/80 rounded-xl border border-slate-800">
+              <span class="text-slate-500 block">Hidden Size</span>
+              <span class="text-white text-base font-bold">640</span>
+            </div>
+            <div class="p-3 bg-slate-900/80 rounded-xl border border-slate-800">
+              <span class="text-slate-500 block">Layers</span>
+              <span class="text-white text-base font-bold">18</span>
+            </div>
+            <div class="p-3 bg-slate-900/80 rounded-xl border border-slate-800">
+              <span class="text-slate-500 block">Heads (Q / KV)</span>
+              <span class="text-white text-base font-bold">4 / 1 (GQA)</span>
+            </div>
+            <div class="p-3 bg-slate-900/80 rounded-xl border border-slate-800">
+              <span class="text-slate-500 block">Head Dim</span>
+              <span class="text-white text-base font-bold">256</span>
+            </div>
+            <div class="p-3 bg-slate-900/80 rounded-xl border border-slate-800">
+              <span class="text-slate-500 block">Vocab Size</span>
+              <span class="text-white text-base font-bold">262,144</span>
+            </div>
+            <div class="p-3 bg-slate-900/80 rounded-xl border border-slate-800">
+              <span class="text-slate-500 block">Sliding Window</span>
+              <span class="text-white text-base font-bold">512</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="glass-card rounded-2xl p-6 space-y-4">
+          <h3 class="text-lg font-semibold text-white">Philosophy</h3>
+          <ul class="space-y-3 text-xs text-slate-300">
+            <li class="flex items-start gap-2">
+              <span class="text-brand-400 font-bold">&check;</span>
+              <span><strong>Agentic Native:</strong> Fine-tuned with planning, decomposition, and tool-calling examples.</span>
+            </li>
+            <li class="flex items-start gap-2">
+              <span class="text-brand-400 font-bold">&check;</span>
+              <span><strong>Candle Powered:</strong> Pure Rust tensor operations, safe memory management, zero Python bindings.</span>
+            </li>
+            <li class="flex items-start gap-2">
+              <span class="text-brand-400 font-bold">&check;</span>
+              <span><strong>Ponytail Mode:</strong> Minimal clean changes, eliminating needless wrappers or premature complexity.</span>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- Training Pipeline Section -->
+    <section id="training" class="scroll-mt-24 space-y-6">
+      <div>
+        <span class="text-xs font-mono uppercase tracking-wider text-brand-400">Fine-Tuning</span>
+        <h2 class="text-2xl sm:text-3xl font-bold text-white mt-1">Reproducible Python Training Pipeline</h2>
+        <p class="text-slate-400 text-sm mt-1">Managed with <code>uv</code>, PyTorch, and Hugging Face Transformers. Outputs Safetensors directly consumable by Rust.</p>
+      </div>
+
+      <div class="glass-card rounded-2xl p-6 space-y-4">
+        <div class="code-block rounded-xl p-4 font-mono text-xs text-slate-300 overflow-x-auto">
+          <span class="text-slate-500"># 1. Inspect or expand dataset</span><br>
+          cd model<br>
+          uv run python src/model/generate_data.py<br><br>
+          <span class="text-slate-500"># 2. Run fine-tuning</span><br>
+          uv run model  <span class="text-slate-500"># or python -m model</span><br><br>
+          <span class="text-slate-500"># 3. Model weights and tokenizer saved automatically to out/</span><br>
+          ls -lh out/  <span class="text-slate-500"># model.safetensors, config.json, tokenizer.json</span>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Footer -->
+  <footer class="border-t border-white/10 bg-slate-950/80 py-12 relative z-10 text-xs text-slate-500">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div class="flex items-center gap-2">
+        <span class="font-bold text-slate-300">Operant Project</span>
+        <span>&bull;</span>
+        <span>GPL-2.0 Licensed</span>
+      </div>
+      <div>
+        <span>Fine-tuned Gemma-3 + Pure Rust Inference Engine</span>
+      </div>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

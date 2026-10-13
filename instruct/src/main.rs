@@ -1,3 +1,4 @@
+use clap::Parser;
 use instruct::cli::{Args, run_model};
 
 #[tokio::main]

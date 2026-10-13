@@ -8,7 +8,7 @@ from pathlib import Path
 import os
 
 DATA = Path(__file__).parent / "data.jsonl"
-MODEL = "google/gemma-3-270m"
+MODEL = "google/gemma-3-270m-it"
 
 def train():
     print("setting one gpu for training")
