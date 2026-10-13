@@ -7,6 +7,7 @@ edition = "2024"
 anyhow = "1.0.104"
 axum = "0.8.9"
 candle = "0.1.0"
+clap = { version = "4.6.7", features = ["derive"] }
 json = "0.12.4"
 reqwest = "0.13.5"
 serde = { version = "1.0.229", features = ["derive"] }

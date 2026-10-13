@@ -2,7 +2,7 @@ use axum::{Json, Router, routing::post};
 use serde::Deserialize;
 use serde::Serialize;
 
-#[derive(Debug, PartialEq, Serialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 struct Message {
     role: String,
     content: String,
@@ -31,7 +31,7 @@ struct ChatResponse {
 }
 
 async fn chat(Json(req): Json<ChatRequest>) -> Json<ChatResponse> {
-    todo!("this should go to the model!!!");
+    //this should go to the model!
     Json(ChatResponse {
         object: "chat.completion",
         model: req.model,
